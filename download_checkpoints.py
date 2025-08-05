@@ -18,8 +18,8 @@ DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
 def get_pipeline():
     FluxControlPipeline.from_pretrained(
         "black-forest-labs/FLUX.1-Depth-dev",
-        torch_dtype=DTYPE
-    )
+        torch_dtype=torch.bfloat16
+        )
     DepthPreprocessor.from_pretrained("LiheYoung/depth-anything-large-hf")
 
 
