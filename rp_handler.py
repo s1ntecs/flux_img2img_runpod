@@ -83,7 +83,7 @@ controlnet = FluxControlNetModel.from_pretrained(
     "InstantX/FLUX.1-dev-Controlnet-Canny",
     torch_dtype=torch.bfloat16
 )
-
+logger.info("controlnet IS READY")
 repo_id = "black-forest-labs/FLUX.1-dev"
 PIPELINE = FluxControlNetImg2ImgPipeline.from_pretrained(
     repo_id,
@@ -91,20 +91,23 @@ PIPELINE = FluxControlNetImg2ImgPipeline.from_pretrained(
     torch_dtype=torch.bfloat16
 ).to(DEVICE)
 
-processor = DepthPreprocessor.from_pretrained(
-    "LiheYoung/depth-anything-large-hf")
+logger.info("PIPELINE IS READY")
 
 
 # ------------------------- ОСНОВНОЙ HANDLER ------------------------------ #
 def handler(job: Dict[str, Any]) -> Dict[str, Any]:
     try:
+        logger.info("HANDLER START")
+
         payload = job.get("input", {})
         image_url = payload.get("image_url")
         if not image_url:
             return {"error": "'image_url' is required"}
+
         prompt = payload.get("prompt")
         if not prompt:
             return {"error": "'prompt' is required"}
+
         neg_prompt = payload.get("neg_prompt")
         if not neg_prompt:
             return {"error": "'neg_prompt' is required"}
@@ -123,11 +126,11 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
             random.randint(0, MAX_SEED)))
 
         control_guidance_start = float(payload.get(
-            "guidance_scale", 0.2))
+            "control_guidance_start", 0.2))
         control_guidance_end = float(payload.get(
-            "guidance_scale", 0.8))
+            "control_guidance_end", 0.8))
         controlnet_conditioning_scale = float(payload.get(
-            "guidance_scale", 1.0))
+            "controlnet_conditioning_scale", 1.0))
 
         generator = torch.Generator(
             device=DEVICE).manual_seed(seed)
