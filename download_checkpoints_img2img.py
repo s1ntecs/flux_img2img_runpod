@@ -16,6 +16,7 @@ DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
 
 # ------------------------- пайплайн -------------------------
 def get_pipeline():
+<<<<<<< HEAD
     controlnet = FluxControlNetModel.from_pretrained(
         "InstantX/FLUX.1-dev-Controlnet-Canny",
         torch_dtype=torch.bfloat16
@@ -26,6 +27,13 @@ def get_pipeline():
         torch_dtype=torch.bfloat16,
         # low_cpu_mem_usage=True,
         # map_location="cpu",
+=======
+    FluxControlPipeline.from_pretrained(
+        "black-forest-labs/FLUX.1-Depth-dev",
+        torch_dtype=torch.bfloat16,          # smaller weights
+        device_map="cpu",                    # avoids cuda init
+        low_cpu_mem_usage=True               # 🤗 transformers arg
+>>>>>>> 60485d3e36e836b38aabb97471eae8b9cf6063c6
     )
     DepthPreprocessor.from_pretrained("LiheYoung/depth-anything-large-hf")
 
