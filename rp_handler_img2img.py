@@ -1,11 +1,11 @@
 # import cv2
+import cv2
 import base64, io, random, time, numpy as np, torch
 from typing import Any, Dict
 from PIL import Image, ImageFilter
 
-from diffusers import FluxControlPipeline
-from controlnet_aux import CannyDetector
-
+from diffusers import FluxControlNetImg2ImgPipeline, FluxControlNetModel
+from image_gen_aux import DepthPreprocessor
 
 import runpod
 from runpod.serverless.utils.rp_download import file as rp_file
@@ -69,32 +69,54 @@ def compute_work_resolution(w, h, max_side=1024):
     return max(new_w, 8), max(new_h, 8)
 
 
+def make_canny_condition(image):
+    image = np.array(image)
+    image = cv2.Canny(image, 100, 200)
+    image = image[:, :, None]
+    image = np.concatenate([image, image, image], axis=2)
+    image = Image.fromarray(image)
+    return image
+
+
 # ------------------------- ЗАГРУЗКА МОДЕЛЕЙ ------------------------------ #
-repo_id = "black-forest-labs/FLUX.1-Canny-dev"
-PIPELINE = FluxControlPipeline.from_pretrained(
+controlnet = FluxControlNetModel.from_pretrained(
+    "InstantX/FLUX.1-dev-Controlnet-Canny",
+    torch_dtype=torch.bfloat16
+)
+logger.info("controlnet IS READY")
+repo_id = "black-forest-labs/FLUX.1-dev"
+PIPELINE = FluxControlNetImg2ImgPipeline.from_pretrained(
     repo_id,
+    controlnet=controlnet,
     torch_dtype=torch.bfloat16
 ).to(DEVICE)
 
-processor = CannyDetector()
+logger.info("PIPELINE IS READY")
 
 
 # ------------------------- ОСНОВНОЙ HANDLER ------------------------------ #
 def handler(job: Dict[str, Any]) -> Dict[str, Any]:
     try:
+        logger.info("HANDLER START")
+
         payload = job.get("input", {})
         image_url = payload.get("image_url")
         if not image_url:
             return {"error": "'image_url' is required"}
+
         prompt = payload.get("prompt")
         if not prompt:
             return {"error": "'prompt' is required"}
+
         neg_prompt = payload.get("neg_prompt")
         if not neg_prompt:
             return {"error": "'neg_prompt' is required"}
 
         guidance_scale = float(payload.get(
             "guidance_scale", 10))
+        strength = float(payload.get(
+            "strength", 0.7))
+
         steps = min(int(payload.get(
             "steps", MAX_STEPS)),
                     MAX_STEPS)
@@ -102,6 +124,14 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         seed = int(payload.get(
             "seed",
             random.randint(0, MAX_SEED)))
+
+        control_guidance_start = float(payload.get(
+            "control_guidance_start", 0.2))
+        control_guidance_end = float(payload.get(
+            "control_guidance_end", 0.8))
+        controlnet_conditioning_scale = float(payload.get(
+            "controlnet_conditioning_scale", 1.0))
+
         generator = torch.Generator(
             device=DEVICE).manual_seed(seed)
 
@@ -113,17 +143,17 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         image_pil = image_pil.resize((work_w, work_h),
                                      Image.Resampling.LANCZOS)
 
-        control_image = processor(image_pil,
-                                  low_threshold=50,
-                                  high_threshold=200,
-                                  detect_resolution=1024,
-                                  image_resolution=1024)
+        control_image = make_canny_condition(image_pil)
 
         # ------------------ генерация ---------------- #
         images = PIPELINE(
             prompt=prompt,
+            image=image_pil,
             control_image=control_image,
-            neg_prompt=neg_prompt,
+            control_guidance_start=control_guidance_start,
+            control_guidance_end=control_guidance_end,
+            controlnet_conditioning_scale=controlnet_conditioning_scale,
+            strength=strength,
             num_inference_steps=steps,
             guidance_scale=guidance_scale,
             generator=generator,
