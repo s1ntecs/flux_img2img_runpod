@@ -1,10 +1,9 @@
 # import cv2
-import cv2
 import base64, io, random, time, numpy as np, torch
 from typing import Any, Dict
 from PIL import Image, ImageFilter
 
-from diffusers import FluxControlNetImg2ImgPipeline, FluxControlNetModel
+from diffusers import FluxControlPipeline, FluxTransformer2DModel
 from image_gen_aux import DepthPreprocessor
 
 import runpod
@@ -69,25 +68,10 @@ def compute_work_resolution(w, h, max_side=1024):
     return max(new_w, 8), max(new_h, 8)
 
 
-def make_canny_condition(image):
-    image = np.array(image)
-    image = cv2.Canny(image, 100, 200)
-    image = image[:, :, None]
-    image = np.concatenate([image, image, image], axis=2)
-    image = Image.fromarray(image)
-    return image
-
-
 # ------------------------- ЗАГРУЗКА МОДЕЛЕЙ ------------------------------ #
-controlnet = FluxControlNetModel.from_pretrained(
-    "InstantX/FLUX.1-dev-Controlnet-Canny",
-    torch_dtype=torch.bfloat16
-)
-
-repo_id = "black-forest-labs/FLUX.1-dev"
-PIPELINE = FluxControlNetImg2ImgPipeline.from_pretrained(
+repo_id = "black-forest-labs/FLUX.1-Depth-dev"
+PIPELINE = FluxControlPipeline.from_pretrained(
     repo_id,
-    controlnet=controlnet,
     torch_dtype=torch.bfloat16
 ).to(DEVICE)
 
@@ -105,15 +89,12 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         prompt = payload.get("prompt")
         if not prompt:
             return {"error": "'prompt' is required"}
-        neg_prompt = payload.get("neg_prompt")
+        neg_prompt =  payload.get("neg_prompt")
         if not neg_prompt:
             return {"error": "'neg_prompt' is required"}
 
         guidance_scale = float(payload.get(
             "guidance_scale", 10))
-        strength = float(payload.get(
-            "strength", 0.7))
-
         steps = min(int(payload.get(
             "steps", MAX_STEPS)),
                     MAX_STEPS)
@@ -121,14 +102,6 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         seed = int(payload.get(
             "seed",
             random.randint(0, MAX_SEED)))
-
-        control_guidance_start = float(payload.get(
-            "guidance_scale", 0.2))
-        control_guidance_end = float(payload.get(
-            "guidance_scale", 0.8))
-        controlnet_conditioning_scale = float(payload.get(
-            "guidance_scale", 1.0))
-
         generator = torch.Generator(
             device=DEVICE).manual_seed(seed)
 
@@ -140,17 +113,13 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         image_pil = image_pil.resize((work_w, work_h),
                                      Image.Resampling.LANCZOS)
 
-        control_image = make_canny_condition(image_pil)
+        control_image = processor(image_pil)[0].convert("RGB")
 
         # ------------------ генерация ---------------- #
         images = PIPELINE(
             prompt=prompt,
-            image=image_pil,
             control_image=control_image,
-            control_guidance_start=control_guidance_start,
-            control_guidance_end=control_guidance_end,
-            controlnet_conditioning_scale=controlnet_conditioning_scale,
-            strength=strength,
+            neg_prompt=neg_prompt,
             num_inference_steps=steps,
             guidance_scale=guidance_scale,
             generator=generator,
