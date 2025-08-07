@@ -89,9 +89,6 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         prompt = payload.get("prompt")
         if not prompt:
             return {"error": "'prompt' is required"}
-        neg_prompt = payload.get("neg_prompt")
-        if not neg_prompt:
-            return {"error": "'neg_prompt' is required"}
 
         guidance_scale = float(payload.get(
             "guidance_scale", 10))
@@ -119,7 +116,7 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         images = PIPELINE(
             prompt=prompt,
             control_image=control_image,
-            neg_prompt=neg_prompt,
+            # neg_prompt=neg_prompt,
             num_inference_steps=steps,
             guidance_scale=guidance_scale,
             generator=generator,
