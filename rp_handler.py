@@ -123,7 +123,6 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         images = PIPELINE(
             prompt=prompt,
             control_image=control_image,
-            neg_prompt=neg_prompt,
             num_inference_steps=steps,
             guidance_scale=guidance_scale,
             generator=generator,
