@@ -3,9 +3,8 @@ import base64, io, random, time, numpy as np, torch
 from typing import Any, Dict
 from PIL import Image, ImageFilter
 
-from diffusers import FluxControlPipeline
-from controlnet_aux import CannyDetector
-
+from diffusers import FluxControlPipeline, FluxTransformer2DModel
+from image_gen_aux import DepthPreprocessor
 
 import runpod
 from runpod.serverless.utils.rp_download import file as rp_file
@@ -70,13 +69,14 @@ def compute_work_resolution(w, h, max_side=1024):
 
 
 # ------------------------- ЗАГРУЗКА МОДЕЛЕЙ ------------------------------ #
-repo_id = "black-forest-labs/FLUX.1-Canny-dev"
+repo_id = "black-forest-labs/FLUX.1-Depth-dev"
 PIPELINE = FluxControlPipeline.from_pretrained(
     repo_id,
     torch_dtype=torch.bfloat16
 ).to(DEVICE)
 
-processor = CannyDetector()
+processor = DepthPreprocessor.from_pretrained(
+    "LiheYoung/depth-anything-large-hf")
 
 
 # ------------------------- ОСНОВНОЙ HANDLER ------------------------------ #
@@ -113,16 +113,13 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         image_pil = image_pil.resize((work_w, work_h),
                                      Image.Resampling.LANCZOS)
 
-        control_image = processor(image_pil,
-                                  low_threshold=50,
-                                  high_threshold=200,
-                                  detect_resolution=1024,
-                                  image_resolution=1024)
+        control_image = processor(image_pil)[0].convert("RGB")
 
         # ------------------ генерация ---------------- #
         images = PIPELINE(
             prompt=prompt,
             control_image=control_image,
+            neg_prompt=neg_prompt,
             num_inference_steps=steps,
             guidance_scale=guidance_scale,
             generator=generator,

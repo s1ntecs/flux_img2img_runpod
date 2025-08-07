@@ -23,7 +23,7 @@ def get_pipeline():
     )
 
     repo_id = "black-forest-labs/FLUX.1-dev"
-    PIPELINE = FluxControlNetImg2ImgPipeline.from_pretrained(
+    FluxControlNetImg2ImgPipeline.from_pretrained(
         repo_id,
         controlnet=controlnet,
         torch_dtype=torch.bfloat16

@@ -2,6 +2,7 @@ import os
 import torch
 
 from diffusers import FluxControlPipeline
+from image_gen_aux import DepthPreprocessor
 
 # from huggingface_hub import hf_hub_download
 
@@ -16,9 +17,10 @@ DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
 # ------------------------- пайплайн -------------------------
 def get_pipeline():
     FluxControlPipeline.from_pretrained(
-        "black-forest-labs/FLUX.1-Canny-dev",
+        "black-forest-labs/FLUX.1-Depth-dev",
         torch_dtype=torch.bfloat16
     )
+    DepthPreprocessor.from_pretrained("LiheYoung/depth-anything-large-hf")
 
 
 if __name__ == "__main__":
