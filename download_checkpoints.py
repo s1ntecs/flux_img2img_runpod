@@ -1,8 +1,7 @@
 import os
 import torch
 
-from diffusers import FluxControlNetModel, FluxControlNetPipeline
-from image_gen_aux import DepthPreprocessor
+from diffusers import FluxControlPipeline
 
 # from huggingface_hub import hf_hub_download
 
@@ -10,23 +9,16 @@ from image_gen_aux import DepthPreprocessor
 os.makedirs("loras", exist_ok=True)
 os.makedirs("checkpoints", exist_ok=True)
 
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
+
 
 # ------------------------- пайплайн -------------------------
 def get_pipeline():
-    base_repo = "black-forest-labs/FLUX.1-dev"
-    controlnet_repo = "Shakker-Labs/FLUX.1-dev-ControlNet-Depth"
-
-    CONTROLNET = FluxControlNetModel.from_pretrained(
-        controlnet_repo, torch_dtype=torch.bfloat16
-    )
-
-    FluxControlNetPipeline.from_pretrained(
-        base_repo,
-        controlnet=CONTROLNET,
+    FluxControlPipeline.from_pretrained(
+        "black-forest-labs/FLUX.1-Canny-dev",
         torch_dtype=torch.bfloat16
     )
-
-    DepthPreprocessor.from_pretrained("LiheYoung/depth-anything-large-hf")
 
 
 if __name__ == "__main__":
