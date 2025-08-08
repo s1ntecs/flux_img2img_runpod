@@ -1,11 +1,10 @@
 # import cv2
 import base64, io, random, time, numpy as np, torch
 from typing import Any, Dict
-from PIL import Image
+from PIL import Image, ImageFilter
 
-from controlnet_aux import CannyDetector
-from diffusers import FluxControlPipeline
-
+from diffusers import FluxControlPipeline, FluxTransformer2DModel
+from image_gen_aux import DepthPreprocessor
 
 import runpod
 from runpod.serverless.utils.rp_download import file as rp_file
@@ -14,6 +13,7 @@ from runpod.serverless.modules.rp_logger import RunPodLogger
 # --------------------------- КОНСТАНТЫ ----------------------------------- #
 MAX_SEED = np.iinfo(np.int32).max
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DTYPE = torch.bfloat16 if DEVICE == "cuda" else torch.float32
 MAX_STEPS = 250
 
 TARGET_RES = 1024
@@ -69,18 +69,14 @@ def compute_work_resolution(w, h, max_side=1024):
 
 
 # ------------------------- ЗАГРУЗКА МОДЕЛЕЙ ------------------------------ #
-repo_id = "black-forest-labs/FLUX.1-dev"
+repo_id = "black-forest-labs/FLUX.1-Depth-dev"
 PIPELINE = FluxControlPipeline.from_pretrained(
     repo_id,
     torch_dtype=torch.bfloat16
 ).to(DEVICE)
 
-PIPELINE.load_lora_weights(
-    "black-forest-labs/FLUX.1-Canny-dev-lora",
-    adapter_name="canny"
-)
-
-processor = CannyDetector()
+processor = DepthPreprocessor.from_pretrained(
+    "LiheYoung/depth-anything-large-hf")
 
 
 # ------------------------- ОСНОВНОЙ HANDLER ------------------------------ #
@@ -96,18 +92,6 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
 
         guidance_scale = float(payload.get(
             "guidance_scale", 10))
-
-        lora_scale = float(payload.get(
-            "lora_scale", 1.0))
-        canny_low_threshold = int(payload.get(
-            "canny_low_threshold", 50))
-        canny_high_threshold = int(payload.get(
-            "canny_high_threshold", 200))
-        canny_detect_resolution = int(payload.get(
-            "canny_detect_resolution", 1024))
-        canny_image_resolution = int(payload.get(
-            "canny_image_resolution", 1024))
-
         steps = min(int(payload.get(
             "steps", MAX_STEPS)),
                     MAX_STEPS)
@@ -126,21 +110,13 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         image_pil = image_pil.resize((work_w, work_h),
                                      Image.Resampling.LANCZOS)
 
-        control_image = processor(
-            image_pil,
-            low_threshold=canny_low_threshold,
-            high_threshold=canny_high_threshold,
-            detect_resolution=canny_detect_resolution,
-            image_resolution=canny_image_resolution
-        )
-
-        PIPELINE.set_adapters(["canny"],
-                              adapter_weights=[lora_scale])
+        control_image = processor(image_pil)[0].convert("RGB")
 
         # ------------------ генерация ---------------- #
         images = PIPELINE(
             prompt=prompt,
             control_image=control_image,
+            # neg_prompt=neg_prompt,
             num_inference_steps=steps,
             guidance_scale=guidance_scale,
             generator=generator,
