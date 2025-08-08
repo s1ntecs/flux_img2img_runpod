@@ -1,11 +1,10 @@
 # import cv2
 import base64, io, random, time, numpy as np, torch
 from typing import Any, Dict
-from PIL import Image
+from PIL import Image, ImageFilter
 
-from controlnet_aux import CannyDetector
-from diffusers import FluxControlPipeline
-
+from diffusers import FluxControlNetPipeline, FluxControlNetModel
+from image_gen_aux import DepthPreprocessor
 
 import runpod
 from runpod.serverless.utils.rp_download import file as rp_file
@@ -14,6 +13,7 @@ from runpod.serverless.modules.rp_logger import RunPodLogger
 # --------------------------- КОНСТАНТЫ ----------------------------------- #
 MAX_SEED = np.iinfo(np.int32).max
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DTYPE = torch.bfloat16 if DEVICE == "cuda" else torch.float32
 MAX_STEPS = 250
 
 TARGET_RES = 1024
@@ -69,18 +69,22 @@ def compute_work_resolution(w, h, max_side=1024):
 
 
 # ------------------------- ЗАГРУЗКА МОДЕЛЕЙ ------------------------------ #
-repo_id = "black-forest-labs/FLUX.1-dev"
-PIPELINE = FluxControlPipeline.from_pretrained(
-    repo_id,
-    torch_dtype=torch.bfloat16
-).to(DEVICE)
+# БАЗА: FLUX.1-dev + depth ControlNet
+base_repo = "black-forest-labs/FLUX.1-dev"
+controlnet_repo = "Shakker-Labs/FLUX.1-dev-ControlNet-Depth"
 
-PIPELINE.load_lora_weights(
-    "black-forest-labs/FLUX.1-Canny-dev-lora",
-    adapter_name="canny"
+CONTROLNET = FluxControlNetModel.from_pretrained(
+    controlnet_repo, torch_dtype=DTYPE
 )
 
-processor = CannyDetector()
+PIPELINE = FluxControlNetPipeline.from_pretrained(
+    base_repo,
+    controlnet=CONTROLNET,
+    torch_dtype=DTYPE
+).to(DEVICE)
+
+processor = DepthPreprocessor.from_pretrained(
+    "LiheYoung/depth-anything-large-hf")
 
 
 # ------------------------- ОСНОВНОЙ HANDLER ------------------------------ #
@@ -94,55 +98,39 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         if not prompt:
             return {"error": "'prompt' is required"}
 
-        guidance_scale = float(payload.get(
-            "guidance_scale", 10))
+        # ⚙️ Новые параметры
+        neg = payload.get("negative_prompt") or \
+              "blurry, low quality, watermark, logo, text, artifacts, distorted geometry, misaligned perspective"
+        neg2 = payload.get("negative_prompt_2")  # опционально
+        true_cfg_scale = float(payload.get("true_cfg_scale", 3.0))  # >1 чтобы включить «true CFG»
+        cn_scale = float(payload.get("controlnet_conditioning_scale", 0.5))  # depth-рекомендация 0.3–0.7
 
-        lora_scale = float(payload.get(
-            "lora_scale", 1.0))
-        canny_low_threshold = int(payload.get(
-            "canny_low_threshold", 50))
-        canny_high_threshold = int(payload.get(
-            "canny_high_threshold", 200))
-        canny_detect_resolution = int(payload.get(
-            "canny_detect_resolution", 1024))
-        canny_image_resolution = int(payload.get(
-            "canny_image_resolution", 1024))
+        guidance_scale = float(payload.get("guidance_scale", 3.5))
+        steps = min(int(payload.get("steps", MAX_STEPS)), MAX_STEPS)
 
-        steps = min(int(payload.get(
-            "steps", MAX_STEPS)),
-                    MAX_STEPS)
-
-        seed = int(payload.get(
-            "seed",
-            random.randint(0, MAX_SEED)))
-        generator = torch.Generator(
-            device=DEVICE).manual_seed(seed)
+        seed = int(payload.get("seed", random.randint(0, MAX_SEED)))
+        generator = torch.Generator(device=DEVICE).manual_seed(seed)
 
         image_pil = url_to_pil(image_url)
 
         orig_w, orig_h = image_pil.size
         work_w, work_h = compute_work_resolution(orig_w, orig_h, TARGET_RES)
+        image_pil = image_pil.resize((work_w, work_h), Image.Resampling.LANCZOS)
 
-        image_pil = image_pil.resize((work_w, work_h),
-                                     Image.Resampling.LANCZOS)
-
-        control_image = processor(
-            image_pil,
-            low_threshold=canny_low_threshold,
-            high_threshold=canny_high_threshold,
-            detect_resolution=canny_detect_resolution,
-            image_resolution=canny_image_resolution
-        )
-
-        PIPELINE.set_adapters(["canny"],
-                              adapter_weights=[lora_scale])
+        # depth-карта
+        control_image = processor(image_pil)[0].convert("RGB")
 
         # ------------------ генерация ---------------- #
         images = PIPELINE(
             prompt=prompt,
+            prompt_2=None,  # или свой стиль для t5-второго энкодера
+            negative_prompt=neg,               # ✅ теперь поддерживается
+            negative_prompt_2=neg2,            # опционально
+            true_cfg_scale=true_cfg_scale,     # ✅ включает негативку
             control_image=control_image,
+            controlnet_conditioning_scale=cn_scale,
             num_inference_steps=steps,
-            guidance_scale=guidance_scale,
+            guidance_scale=guidance_scale,     # для Flux обычно 3–5 норм
             generator=generator,
             width=work_w,
             height=work_h,
@@ -150,14 +138,14 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
 
         return {
             "images_base64": [pil_to_b64(i) for i in images],
-            "time": round(time.time() - job["created"],
-                          2) if "created" in job else None,
-            "steps": steps, "seed": seed
+            "time": round(time.time() - job["created"], 2) if "created" in job else None,
+            "steps": steps,
+            "seed": seed
         }
 
     except (torch.cuda.OutOfMemoryError, RuntimeError) as exc:
         if "CUDA out of memory" in str(exc):
-            return {"error": "CUDA OOM — уменьшите 'steps' или размер изображения."} # noqa
+            return {"error": "CUDA OOM — уменьшите 'steps' или размер изображения."}
         return {"error": str(exc)}
     except Exception as exc:
         import traceback
