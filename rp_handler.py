@@ -1,7 +1,7 @@
 # import cv2
 import base64, io, random, time, numpy as np, torch
 from typing import Any, Dict
-from PIL import Image
+from PIL import Image, ImageFilter
 
 from diffusers import FluxControlPipeline
 from controlnet_aux import CannyDetector
@@ -103,6 +103,8 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         canny_image_resolution = int(payload.get(
             "canny_image_resolution", 1024))
 
+        blur = float(payload.get("blur", 0.0))
+
         guidance_scale = float(payload.get(
             "guidance_scale", 10))
         steps = min(int(payload.get(
@@ -122,6 +124,10 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
 
         image_pil = image_pil.resize((work_w, work_h),
                                      Image.Resampling.LANCZOS)
+
+        if blur > 0.0:
+            image_pil = image_pil.filter(
+                ImageFilter.GaussianBlur(radius=blur))
 
         control_image = processor(
             image_pil,
