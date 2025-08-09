@@ -3,8 +3,9 @@ import base64, io, random, time, numpy as np, torch
 from typing import Any, Dict
 from PIL import Image, ImageFilter
 
-from diffusers import FluxControlNetPipeline, FluxControlNetModel
+from diffusers import FluxControlPipeline
 from controlnet_aux import CannyDetector
+
 
 import runpod
 from runpod.serverless.utils.rp_download import file as rp_file
@@ -69,19 +70,10 @@ def compute_work_resolution(w, h, max_side=1024):
 
 
 # ------------------------- ЗАГРУЗКА МОДЕЛЕЙ ------------------------------ #
-# БАЗА: FLUX.1-dev + depth ControlNet
-base_repo = "black-forest-labs/FLUX.1-dev"
-controlnet_model = 'InstantX/FLUX.1-dev-Controlnet-Canny'
-
-CONTROLNET = FluxControlNetModel.from_pretrained(
-    controlnet_model,
-    torch_dtype=DTYPE
-)
-
-PIPELINE = FluxControlNetPipeline.from_pretrained(
-    base_repo,
-    controlnet=CONTROLNET,
-    torch_dtype=DTYPE
+repo_id = "black-forest-labs/FLUX.1-Canny-dev"
+PIPELINE = FluxControlPipeline.from_pretrained(
+    repo_id,
+    torch_dtype=torch.bfloat16
 ).to(DEVICE)
 
 processor = CannyDetector()
@@ -97,15 +89,9 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         prompt = payload.get("prompt")
         if not prompt:
             return {"error": "'prompt' is required"}
-
-        # ⚙️ Новые параметры
-        neg = payload.get("negative_prompt") or \
-            "blurry, low quality, watermark, logo, text, artifacts, distorted geometry, misaligned perspective"
-
-        true_cfg_scale = float(payload.get("true_cfg_scale", 3.0))
-        cn_scale = float(payload.get("controlnet_conditioning_scale", 0.5))
-        guidance_scale = float(payload.get("guidance_scale", 3.5))
-        steps = min(int(payload.get("steps", MAX_STEPS)), MAX_STEPS)
+        neg_prompt = payload.get("neg_prompt")
+        if not neg_prompt:
+            return {"error": "'neg_prompt' is required"}
 
         # CANNY SCALE
         canny_low_threshold = int(payload.get(
@@ -116,24 +102,33 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
             "canny_detect_resolution", 1024))
         canny_image_resolution = int(payload.get(
             "canny_image_resolution", 1024))
+
         blur = float(payload.get("blur", 0.0))
 
-        seed = int(payload.get("seed", random.randint(0, MAX_SEED)))
-        generator = torch.Generator(device=DEVICE).manual_seed(seed)
+        guidance_scale = float(payload.get(
+            "guidance_scale", 10))
+        steps = min(int(payload.get(
+            "steps", MAX_STEPS)),
+                    MAX_STEPS)
+
+        seed = int(payload.get(
+            "seed",
+            random.randint(0, MAX_SEED)))
+        generator = torch.Generator(
+            device=DEVICE).manual_seed(seed)
 
         image_pil = url_to_pil(image_url)
 
         orig_w, orig_h = image_pil.size
         work_w, work_h = compute_work_resolution(orig_w, orig_h, TARGET_RES)
+
         image_pil = image_pil.resize((work_w, work_h),
                                      Image.Resampling.LANCZOS)
 
-        # Blur
         if blur > 0.0:
             image_pil = image_pil.filter(
                 ImageFilter.GaussianBlur(radius=blur))
 
-        # canny-карта
         control_image = processor(
             image_pil,
             low_threshold=canny_low_threshold,
@@ -145,10 +140,7 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         # ------------------ генерация ---------------- #
         images = PIPELINE(
             prompt=prompt,
-            negative_prompt=neg,
-            true_cfg_scale=true_cfg_scale,
             control_image=control_image,
-            controlnet_conditioning_scale=cn_scale,
             num_inference_steps=steps,
             guidance_scale=guidance_scale,
             generator=generator,
@@ -158,14 +150,14 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
 
         return {
             "images_base64": [pil_to_b64(i) for i in images],
-            "time": round(time.time() - job["created"], 2) if "created" in job else None,
-            "steps": steps,
-            "seed": seed
+            "time": round(time.time() - job["created"],
+                          2) if "created" in job else None,
+            "steps": steps, "seed": seed
         }
 
     except (torch.cuda.OutOfMemoryError, RuntimeError) as exc:
         if "CUDA out of memory" in str(exc):
-            return {"error": "CUDA OOM — уменьшите 'steps' или размер изображения."}
+            return {"error": "CUDA OOM — уменьшите 'steps' или размер изображения."} # noqa
         return {"error": str(exc)}
     except Exception as exc:
         import traceback

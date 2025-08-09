@@ -1,7 +1,7 @@
 import os
 import torch
 
-from diffusers import FluxControlNetPipeline, FluxControlNetModel
+from diffusers import FluxControlPipeline
 from controlnet_aux import CannyDetector
 
 # from huggingface_hub import hf_hub_download
@@ -16,21 +16,12 @@ DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
 
 # ------------------------- пайплайн -------------------------
 def get_pipeline():
-    base_repo = "black-forest-labs/FLUX.1-dev"
-    controlnet_model = 'InstantX/FLUX.1-dev-Controlnet-Canny'
-
-    CONTROLNET = FluxControlNetModel.from_pretrained(
-        controlnet_model,
-        torch_dtype=DTYPE
+    FluxControlPipeline.from_pretrained(
+        "black-forest-labs/FLUX.1-Canny-dev",
+        torch_dtype=torch.bfloat16
     )
-
-    FluxControlNetPipeline.from_pretrained(
-        base_repo,
-        controlnet=CONTROLNET,
-        torch_dtype=DTYPE
-    ).to(DEVICE)
-
     CannyDetector()
+
 
 if __name__ == "__main__":
     get_pipeline()

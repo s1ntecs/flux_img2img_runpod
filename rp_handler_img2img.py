@@ -91,10 +91,6 @@ PIPELINE = FluxControlNetImg2ImgPipeline.from_pretrained(
     torch_dtype=torch.bfloat16
 ).to(DEVICE)
 
-# PIPELINE.load_lora_weights(
-    
-# )
-
 logger.info("PIPELINE IS READY")
 
 
@@ -164,9 +160,6 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
             width=work_w,
             height=work_h,
         ).images
-        # PIPELINE(
-        #     mask
-        # )
 
         return {
             "images_base64": [pil_to_b64(i) for i in images],
