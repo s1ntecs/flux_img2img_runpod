@@ -2,6 +2,7 @@ import os
 import torch
 
 from diffusers import FluxControlPipeline
+from controlnet_aux import CannyDetector
 
 # from huggingface_hub import hf_hub_download
 
@@ -19,6 +20,7 @@ def get_pipeline():
         "black-forest-labs/FLUX.1-Canny-dev",
         torch_dtype=torch.bfloat16
     )
+    CannyDetector()
 
 
 if __name__ == "__main__":
