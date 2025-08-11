@@ -107,6 +107,11 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         guidance_scale = float(payload.get("guidance_scale", 3.5))
         steps = min(int(payload.get("steps", MAX_STEPS)), MAX_STEPS)
 
+        control_guidance_start = float(payload.get(
+            "control_guidance_start", 0.0))
+        control_guidance_end = float(payload.get(
+            "control_guidance_end", 0.8))
+
         # CANNY SCALE
         canny_low_threshold = int(payload.get(
             "canny_low_threshold", 50))
@@ -149,6 +154,8 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
             true_cfg_scale=true_cfg_scale,
             control_image=control_image,
             controlnet_conditioning_scale=cn_scale,
+            control_guidance_start=control_guidance_start,
+            control_guidance_end=control_guidance_end,
             num_inference_steps=steps,
             guidance_scale=guidance_scale,
             generator=generator,
