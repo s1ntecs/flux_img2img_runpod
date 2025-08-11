@@ -5,7 +5,6 @@ from typing import Any, Dict
 from PIL import Image, ImageFilter
 
 from diffusers import FluxControlNetImg2ImgPipeline, FluxControlNetModel
-from image_gen_aux import DepthPreprocessor
 
 import runpod
 from runpod.serverless.utils.rp_download import file as rp_file
